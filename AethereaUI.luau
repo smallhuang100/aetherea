@@ -1898,7 +1898,7 @@ AutoSaveConfig==nil then config.AutoSaveConfig=true end if config.AutoLoadConfig
 LoadConfigOnLoad else config.AutoLoadConfig=true end end if config.
 SaveWindowPosition==nil then config.SaveWindowPosition=true end for i,file in
 ipairs(kLucideIcons)do Assets.Register(i,kLucideURL..file)end Assets.Register(
-1000000000,kBaseURL..'Images/aetherea_logo.png')task.spawn(Assets.Preload)local
+1000000000,kBaseURL..'aetherea_logo.png')task.spawn(Assets.Preload)local
 window=Window.New(config,theme,self.Flags)window.notif_manager=
 NotificationManager.New(window)window.keybinds_window=KeybindsWindow.New(window)
 return window end function AethereaUI:SaveConfig(folder,filename)Config.Save(
