@@ -342,7 +342,7 @@ pcall(LPH_NO_VIRTUALIZE(function()
                 return old_getfenv(...)
             end
 
-            local ToInspect: (...any) -> (...any) | number = ...
+            local ToInspect = ...
 
             local Success, ResultingEnv = pcall(function()
                 if typeof(ToInspect) == "number" and ToInspect >= 0 then
