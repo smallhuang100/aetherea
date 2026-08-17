@@ -9,9 +9,8 @@ if not game:IsLoaded() then game.Loaded:Wait() end
 
 if not LPH_OBFUSCATED then
 	local DevApiKey = ""
-	local ScriptId = "" 
-	local Key = "" 
-
+	local ScriptId = ""
+	local Key = ""
 
 	LPH_ENCNUM = function(toEncrypt, ...)
 		assert(type(toEncrypt) == "number" and #{...} == 0, "LPH_ENCNUM only accepts a single double or integer as an argument.")
@@ -1899,6 +1898,7 @@ local states = {
             anti_smoke = false,
 
             camera_fov = modules.CameraController._base_fov,
+            fov_overridden = false,
             camera_resolution = 1,
         },
         lighting = {
@@ -2364,7 +2364,9 @@ end
 local orig_startrl = modules.Gun.StartReloading
 modules.Gun.StartReloading = LPH_NO_VIRTUALIZE(function(u21, p22, p23, p24, p25)
     states.is_reloading = true
-    task.delay(u21.Info.ReloadLength + 0.1, function()
+    -- 散彈槍等逐發裝彈的武器沒有 ReloadLength，nil + 0.1 會直接報錯，
+    -- 導致下面 orig_startrl 永遠不會被呼叫到，裝彈鍵完全沒反應
+    task.delay((u21.Info.ReloadLength or 1) + 0.1, function()
         states.is_reloading = false
     end)
 
@@ -2388,15 +2390,18 @@ pcall(LPH_JIT_MAX(function()
     local real_lin_vel
     local real_ang_vel
 
-    services.RunService:BindToRenderStep(tostring(math.random(100000, 999999)), 0, LPH_NO_VIRTUALIZE(function()
+    services.RunService:BindToRenderStep(tostring(math.random(100000, 999999)), 1, LPH_NO_VIRTUALIZE(function()
         local root = LocalChar and LocalChar.PrimaryPart
         if not root or not root.Parent or not real then
             return
         end
 
-        root.AssemblyLinearVelocity = real_lin_vel or Vector3.zero
-        root.AssemblyAngularVelocity = real_ang_vel or Vector3.zero
-        root.CFrame = real
+        -- FIX: 只有功能開啟(desync)時才重置，否則讓原生物理自然運行
+        if not server_cf_sync then
+            root.AssemblyLinearVelocity = real_lin_vel or Vector3.zero
+            root.AssemblyAngularVelocity = real_ang_vel or Vector3.zero
+            root.CFrame = real
+        end
     end))
 
     services.RunService.PostSimulation:Connect(LPH_NO_VIRTUALIZE(function()
@@ -2411,6 +2416,7 @@ pcall(LPH_JIT_MAX(function()
 
         if server_cf_sync then
             states.server_cf = real
+            return  -- FIX: 同步模式下不覆蓋 CFrame
         end
 
         root.CFrame = states.server_cf
@@ -4399,38 +4405,49 @@ pcall(function()
         return old_fighterget(self, idx, ...)
     end
 
+    -- FIX: 不再永久覆寫 IsGrounded 為 false，避免干擾鐮刀 dash 重力
+    -- 改為僅在需要無限二段跳時才短暫影響 Fighter.Get("DisableDoubleJumping")
+    -- (已在上面 fighter.Get hook 中處理)
+
     local old_isgrounded = fighter.IsGrounded
     fighter.IsGrounded = function(self)
         local state = states.rage_state.movement
-        if state.infinite_double_jump then
-            return false
-        end
+        -- FIX: infinite_double_jump 不再讓 IsGrounded 永遠 false
+        -- 只由 DisableDoubleJumping hook 影響二段跳能力，不干擾 dash 重力
         return old_isgrounded(self)
     end
 
-    --[[
+    -- FIX: 恢復二段跳覆寫 (原被註解掉導致無法二段跳)
     local orig_dj = modules.MechanicsController.DoubleJump
     modules.MechanicsController.DoubleJump = LPH_JIT_MAX(function(self)
         local state = states.rage_state.movement
-        if not state.double_jump_height then
+
+        -- FIX: 若雙跳功能全部關閉，直接走原生邏輯，不干擾遊戲正常二段跳
+        if not state.double_jump_height and not state.infinite_double_jump then
             return orig_dj(self)
         end
 
         if self:IsAlive() and not self:IsFrozen() then
-            local move = self.LocalFighter:GetMoveVector(true, true)
             local hum = self.LocalFighter.Entity.Humanoid
             local root = self.LocalFighter.Entity.RootPart
 
-            local boost = states.rage_state.movement.double_jump_height_value or 1.5
+            local boost = state.double_jump_height and state.double_jump_height_value or 1.0
+            local move = self.LocalFighter:GetMoveVector(true, true)
 
             root.Velocity = move * hum.WalkSpeed + Vector3.new(0, hum.JumpPower * 1.1 * boost, 0)
 
             self.LocalFighter.Entity:AirborneRedirect()
             self:PlayMechanicsSound("DoubleJump")
+
+            -- FIX: 重力檢查 (只在不使用原生的時候)
+            task.wait(0.05)
+            pcall(function()
+                if workspace.Gravity < 100 then
+                    workspace.Gravity = 196.2
+                end
+            end)
         end
     end)
-
-    ]]
 end)
 
 --[[
@@ -5853,7 +5870,7 @@ local function UpdateWeatherOptions()
             NumberSequenceKeypoint.new(1, 0, 0)
         })
         emitter.Squash = NumberSequence.new(-3)
-        emitter.Texture = GetCustomImage(kConstants.kBaseURL .. "Textures/rain.png") or ""
+        emitter.Texture = GetCustomImage(kConstants.kBaseURL .. "Textures/rain.png")
         emitter.Transparency = NumberSequence.new({
             NumberSequenceKeypoint.new(0, 1, 0),
             NumberSequenceKeypoint.new(0.196451, 0.83125, 0),
@@ -5890,7 +5907,7 @@ local function UpdateWeatherOptions()
             NumberSequenceKeypoint.new(0, 0.125, 0),
             NumberSequenceKeypoint.new(1, 0.05, 0)
         })
-        emitter.Texture = GetCustomImage(kConstants.kBaseURL .. "Textures/snow.png") or ""
+        emitter.Texture = GetCustomImage(kConstants.kBaseURL .. "Textures/snow.png")
         emitter.Transparency = NumberSequence.new({
             NumberSequenceKeypoint.new(0, 1, 0),
             NumberSequenceKeypoint.new(0.02, 0.4, 0),
@@ -5932,7 +5949,7 @@ local function UpdateWeatherOptions()
             NumberSequenceKeypoint.new(1, 0, 0)
         })
         emitter.Squash = NumberSequence.new(-5)
-        emitter.Texture = GetCustomImage(kConstants.kBaseURL .. "Textures/rain.png") or ""
+        emitter.Texture = GetCustomImage(kConstants.kBaseURL .. "Textures/rain.png")
         emitter.Transparency = NumberSequence.new({
             NumberSequenceKeypoint.new(0, 1, 0),
             NumberSequenceKeypoint.new(0.196451, 0.83125, 0),
@@ -6108,7 +6125,13 @@ end)
 
 services.RunService.RenderStepped:Connect(LPH_NO_VIRTUALIZE(function()
     workspace.CurrentCamera.CFrame = workspace.CurrentCamera.CFrame * CFrame.new(0, 0, 0, 1, 0, 0, 0, states.visuals_state.camera.camera_resolution, 0, 0, 0, 1)
-    modules.CameraController._base_fov = states.visuals_state.camera.camera_fov
+
+    -- 只有使用者真的動過 FOV 滑桿才強制寫回，否則每一幀都在跟遊戲自己的
+    -- CameraController 搶 _base_fov
+    if states.visuals_state.camera.fov_overridden then
+        modules.CameraController._base_fov = states.visuals_state.camera.camera_fov
+    end
+
     services.Lighting.ClockTime = states.visuals_state.skybox.clocktime
 end))
 
@@ -11042,6 +11065,7 @@ ui_objects.CameraSection:CreateSlider({
     CurrentValue = states.visuals_state.camera.camera_fov,
     Callback = function(v)
         states.visuals_state.camera.camera_fov = v
+        states.visuals_state.camera.fov_overridden = true
     end
 })
 
