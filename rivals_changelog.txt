@@ -1,0 +1,5 @@
+Aetherea
+
+修正：
+- Assets.Preload 呼叫了未定義的 http_get，導致部分資源永遠下載失敗
+- 自訂開槍音效寫入快取時會崩潰的問題
